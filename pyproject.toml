@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reorderwitness"
+version = "0.1.0"
+description = "Find input-order-dependent behavior in JSONL command-line data processors"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "alkinbg"}]
+keywords = ["testing", "jsonl", "metamorphic-testing", "data-pipelines", "order-independence"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.scripts]
+reorderwitness = "reorderwitness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
