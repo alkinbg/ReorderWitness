@@ -1,116 +1,108 @@
-# ReorderWitness (research prototype)
+# ReorderWitness
 
-**Find a short, reproducible input-order bug in a JSONL batch processor.**
+[![Tests](https://github.com/alkinbg/ReorderWitness/actions/workflows/tests.yml/badge.svg)](https://github.com/alkinbg/ReorderWitness/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This is an independent Python experiment, not a published PyPI release.
-It does not depend on PHP, Symfony, databases, hosted services, or third-party runtime libraries.
+**Find input-order-dependent bugs in JSONL processors and save a small reproducer.**
 
-## The problem
+If a batch operation *should* produce the same result for the same records in any order, ReorderWitness tests that assumption by launching your command with different record orders. When it finds a consistent difference, it attempts to reduce the input and writes the evidence to disk.
 
-Some batch operations should be invariant to input order. Consider a deduplicator
-that should select the highest version of each `id`. If it instead selects the
-**first** record seen, changing the incoming order changes business results.
-Simple happy-path tests can miss this.
+It is a **Python CLI research prototype**, not a library published on PyPI. You do not need to write a custom property-based test to try it against a compatible stdin/stdout program.
 
-ReorderWitness launches a **local program** that reads JSON Lines from stdin and
-writes JSON Lines to stdout. It repeats the exact input to check for observed
-nondeterminism; then tries a bounded series of reorderings, compares the output
-**multiset** (not output line order), reduces a failing input by chunk removal,
-and confirms the witness by rerunning each order twice. It saves both inputs,
-both outputs and a machine-readable explanation.
+## A two-record example
 
-It **does not prove** order independence in general. The input records and the
-invariance assumption are supplied by the caller.
+Imagine a deduplicator that must select the record with the highest `version` for each `id`:
 
-## Quick start (Python 3.11+)
+```jsonl
+{"id":"alfa","version":1,"value":"old"}
+{"id":"alfa","version":2,"value":"new"}
+```
 
-From the repository root:
+The deliberately broken example keeps the *first* record it sees. Reversing the input changes which value wins.
+
+From a checkout of this repository (Python 3.11+):
+
+```bash
+python -m pip install -e .
+reorderwitness --input examples/two-records.jsonl --output-dir evidence -- python examples/processor_broken.py
+```
+
+Example result:
+
+```text
+DIFFERENCE: 2 records reduced to 2; 7 executions
+Evidence: evidence
+```
+
+The command returns exit code **1** when it confirms a difference. It saves `original-order.jsonl`, `reordered-input.jsonl`, both corresponding outputs, and `report.json` under the new `evidence/` directory. Execution counts depend on the search and may vary.
+
+Try the correct implementation:
+
+```bash
+reorderwitness --input examples/two-records.jsonl -- python examples/processor_correct.py
+```
+
+This example exits **0** when no difference is observed in the attempted permutations. Exit 0 is **not proof** of order independence.
+
+## Another independent example: graph connectivity
+
+A connected-components calculator should return the same partition regardless of the order of an undirected graph's edges. The included broken one-pass algorithm violates that rule; ReorderWitness can reduce the counterexample to two connected edges.
+
+```bash
+reorderwitness --input examples/graph-components/edges.jsonl \
+  --output-dir graph-evidence -- \
+  python examples/graph-components/processor_broken.py
+```
+
+For the witness and expected results, see [the graph example](docs/graph-witness.md). These are synthetic demonstrations, not independent production integrations.
+
+## How it works
+
+1. Run the same input twice to check for obvious nondeterminism.
+2. Try a bounded number of permutations of the *same multiset* of input records.
+3. Compare output as a multiset of JSON objects, not raw text; output row order and object key order do not matter, but duplicate counts do.
+4. When a difference appears, remove chunks of records while attempting to preserve it.
+5. Re-run both orders to confirm the witness, then write the inputs, outputs, and structured diff.
+
+The reduction is **not guaranteed globally minimal**. The target's order-independence requirement comes from **you**: the tool cannot determine whether different output is actually a bug in your application.
+
+## Input, output and exit codes
+
+- **Input:** UTF-8 JSON Lines with one JSON **object** per nonblank line.
+- **Target:** an executable command after `--`; it receives the JSONL input on stdin and must write JSON objects as JSONL on stdout with exit code 0.
+- **Comparison:** output is compared as a multiset. Nested array ordering remains significant; `1` and `1.0` remain distinct.
+- **Exit 0:** no difference observed within the configured search, **not a proof**.
+- **Exit 1:** consistent order-dependent output observed.
+- **Exit 2:** inconclusive, invalid input, resource budget exceeded, or CLI usage problem.
+- **Report:** generated only for a confirmed difference. Existing output directories are **not overwritten**.
+
+Run `reorderwitness --help` for available options: `--trials`, `--seed`, `--timeout`, `--max-executions`, `--max-records`, `--max-input-bytes`, `--max-output-bytes` and `--max-total-seconds`.
+
+## Safety: read this before running against your program
+
+**ReorderWitness is not a sandbox.** It runs the supplied command repeatedly with the caller's permissions, files, network access and environment variables. Only test **trusted, deterministic, isolated, side-effect-free** commands on disposable or synthetic input. Do not target production jobs, databases, payments, email senders, or arbitrary downloaded programs.
+
+Default limits are 1,000 input records / 2 MiB of input, 2 MiB of captured stdout, 64 KiB of stderr, 10 seconds per invocation, 120 seconds overall and 200 executions. These are **tool-side budgets**, not CPU or RAM limits on the target. On POSIX the tool attempts to terminate the launched process group after an overrun; Windows cleanup only terminates the immediate process. Descendants that detach can survive.
+
+Fixed seeds reproduce permutation selection, **not** external randomness or mutable state in the target. Invalid JSON, timeouts, overflows and unstable output return *inconclusive*, rather than falsely claiming a confirmed order bug.
+
+Evidence files contain actual input and output records. Avoid secrets or personal data and do not upload sensitive evidence to public issues.
+
+## Development
+
+Supported interpreter range: Python **3.11+**. GitHub Actions currently tests **3.11, 3.12 and 3.13 on Ubuntu**; other environments, including Windows, have not been verified to the same extent. No third-party **runtime** dependencies are required.
 
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests -v
-reorderwitness --input examples/records.jsonl --output-dir /tmp/reorderwitness-broken -- python examples/processor_broken.py
-# exit code 1: output difference found, evidence files written
-reorderwitness --input examples/records.jsonl -- python examples/processor_correct.py
-# exit code 0: no difference observed in bounded trials
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributions, [SECURITY.md](SECURITY.md) for private vulnerability reports, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for conduct, and [ACCESSIBILITY.md](ACCESSIBILITY.md) for CLI accessibility notes.
 
-### Independent example: graph connectivity
+## Project status
 
-A connected-component finder must produce the same partition for any ordering
-of an undirected graph's edges. The deliberately broken example performs just
-one pass of label propagation, so two connected edges in a different order can
-create different groups. The correct reference uses union-find.
+**Experimental 0.1.0 source version.** This is a small, narrowly scoped black-box metamorphic test tool, not a replacement for [Hypothesis](https://hypothesis.readthedocs.io/) or other established test frameworks. The two demonstrated scenarios are synthetic. There is **no published PyPI package or official GitHub Release** yet.
 
-```bash
-reorderwitness --input examples/graph-components/edges.jsonl \
-  --output-dir /tmp/reorderwitness-graph-broken -- \
-  python examples/graph-components/processor_broken.py
-# exit 1: order-dependent partition, reduced to 2 connected edges
+The [research notes](docs/decision.bg.md) explain the initial scope and trade-offs. Contributions and independent use cases are welcome, but compatibility and performance guarantees beyond the documented tests are not claimed.
 
-reorderwitness --input examples/graph-components/edges.jsonl \
-  -- python examples/graph-components/processor_correct.py
-# exit 0: no difference observed in tested permutations (NOT proof)
-```
-
-These two examples use unrelated algorithms: revision selection and graph
-connectivity. Both are intentionally synthetic; neither is evidence of market
-adoption or comprehensive correctness.
-
-On Windows, use an unused path under your temp directory instead of `/tmp`.
-For direct execution without installation: `PYTHONPATH=src python -m reorderwitness ...`.
-
-### CLI contract
-
-- Input is UTF-8 JSON Lines containing **objects**, one per line.
-- The target command is provided **after `--`**; it receives input on stdin.
-- The target must return UTF-8 JSON objects, one per stdout line, exit code zero.
-- Output order and JSON object key order are ignored; **duplicate row counts are preserved**.
-- The target should be deterministic, isolated, read-only, and quick to run.
-- A bug is when the same *multiset of input records*, in a different order, yields a different output multiset.
-
-Exit codes: `0` = no difference observed (not a proof); `1` = confirmed difference;
-`2` = inconclusive or usage/runtime error.
-
-Options: `--trials`, `--seed`, `--timeout`, `--max-executions`,
-`--max-records`, `--max-input-bytes`, `--max-output-bytes`,
-`--max-total-seconds`, and `--output-dir`. Evidence is written only for a confirmed
-mismatch and is never allowed to silently overwrite an existing directory.
-
-## Safety and correctness limits
-
-- **Never run against production, untrusted code, or an effectful job.** The command runs many
-  times in the caller's environment. It is NOT sandboxed and receives normal
-  permissions and environment variables. Run any questionable executable inside
-  a separately configured, disposable, network-isolated container.
-- The CLI limits JSONL input file size to 2 MiB (1000 records) by default;
-  stdout is captured up to 2 MiB and stderr up to 64 KiB per execution.
-  Exceeding these limits returns `INCONCLUSIVE` (exit `2`). These sizes can
-  be changed; they are not a memory limit on the target process itself.
-- Per-execution wall time defaults to 10 seconds, with a 120-second overall
-  audit budget and at most 200 launched commands. The tool attempts to kill
-  the target's process group on POSIX on timeouts and overflows; on Windows
-  only the immediate child is terminated. Detached descendants may survive.
-- A failure to execute, invalid JSON, timeout or inconsistent repeated output
-  is reported as **inconclusive**, not a confirmed order bug.
-- A fixed seed makes the tool's permutation search reproducible, not the target's
-  own randomness, clocks, network or external state.
-- Shrinking uses chunk deletion and finite trials. It is NOT guaranteed to find
-  a globally minimal counterexample; it only preserves a witness when possible.
-- Equality uses canonical JSON with duplicate counts; `1` and `1.0` remain
-  distinct, and comparison ignores output row order, not nested array order.
-- The command has no access to a claimed semantics of the target: legitimate
-  order-sensitive operations will be flagged if the caller incorrectly asserts
-  invariance.
-
-## Project stage
-
-Research spike suitable for an **experimental** public GitHub repository.
-A second independent graph-connectivity scenario has been validated.
-The GitHub name search has no exact matches, but PyPI name availability
-remains unverified and must not be assumed. Subprocess output and wall time
-are now bounded, but this is **not** CPU/memory isolation or a sandbox.
-The GitHub Actions matrix includes Python 3.11, 3.12, and 3.13; successful
-CI runs are still required before claiming compatibility with all three.
-This project has not been published to PyPI. MIT license included.
+Released under the [MIT License](LICENSE).
