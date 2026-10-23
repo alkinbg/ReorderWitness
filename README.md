@@ -56,6 +56,22 @@ reorderwitness --input examples/graph-components/edges.jsonl \
 
 For the witness and expected results, see [the graph example](docs/graph-witness.md). These are synthetic demonstrations, not independent production integrations.
 
+## A Python standard-library trap: `itertools.groupby`
+
+Python's `itertools.groupby` groups **consecutive** matching keys; it is not an
+order-independent SQL-style aggregation. The included synthetic example misuses
+`groupby` on unsorted records and produces separate totals for the same customer.
+ReorderWitness detects the inconsistency and preserves a three-record witness.
+
+```bash
+reorderwitness --input examples/groupby/records.jsonl \
+  --output-dir groupby-evidence -- \
+  python examples/groupby/processor_broken.py
+```
+
+For a correct comparison using `defaultdict`, see [the documented
+example](docs/groupby-example.md), including the expected outputs and limitations.
+
 ## How it works
 
 1. Run the same input twice to check for obvious nondeterminism.
@@ -101,7 +117,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contributions, [SECURITY.md](SECURITY
 
 ## Project status
 
-**Experimental 0.1.0 source version.** This is a small, narrowly scoped black-box metamorphic test tool, not a replacement for [Hypothesis](https://hypothesis.readthedocs.io/) or other established test frameworks. The two demonstrated scenarios are synthetic. There is **no published PyPI package or official GitHub Release** yet.
+**Experimental 0.1.0 source version.** This is a small, narrowly scoped black-box metamorphic test tool, not a replacement for [Hypothesis](https://hypothesis.readthedocs.io/) or other established test frameworks. All three demonstrated scenarios are synthetic. There is **no published PyPI package or official GitHub Release** yet.
 
 The [research notes](docs/decision.bg.md) explain the initial scope and trade-offs. Contributions and independent use cases are welcome, but compatibility and performance guarantees beyond the documented tests are not claimed.
 
